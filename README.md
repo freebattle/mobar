@@ -23,21 +23,31 @@ MEM  61%  ↓  13 KB/s
 
 **小。** 1000 行 Swift，纯 AppKit，无第三方依赖，常驻内存约 48 MB、CPU 接近 0。
 
-## 安装
+## 下载
+
+[Releases](https://github.com/freebattle/mobar/releases) 里有编译好的通用二进制（arm64 + x86_64），160 KB，解压拖进「应用程序」就能用。
+
+因为是 ad-hoc 本地签名、没走 Apple 公证，从浏览器下载的包带 quarantine 标记，首次打开会被 Gatekeeper 拦下。两种放行方式：
+
+- 右键点 `MoBar.app` 选「打开」，在弹窗里再点一次「打开」
+- 或者直接去掉标记：`xattr -dr com.apple.quarantine /Applications/MoBar.app`
+
+不想跑来路不明的二进制，就照下面自己编，代码一共 1000 行。
+
+## 自己编译
 
 需要 macOS 13 或更新版本，以及 Xcode 命令行工具（`xcode-select --install`）。
 
 ```bash
 git clone https://github.com/freebattle/mobar.git
 cd mobar
-./build-app.sh
+./build-app.sh              # 只编当前架构，快
+./build-app.sh --universal  # arm64 + x86_64 通用二进制
 cp -R dist/MoBar.app /Applications/
 open /Applications/MoBar.app
 ```
 
 开机自启：系统设置 → 通用 → 登录项，添加 `/Applications/MoBar.app`。
-
-打包脚本用的是 ad-hoc 本地签名，不是开发者证书。首次打开如果被 Gatekeeper 拦下，右键点图标选「打开」即可。
 
 ## 用法
 
@@ -89,7 +99,8 @@ MOBAR_DEBUG=1 .build/release/MoBar           # 前台跑，每帧样本打到 st
 ## 已知限制
 
 - **上不了 App Store。** mole 数据源需要 spawn 子进程，App Sandbox 不允许，所以整个 app 没开沙盒。
-- **只测过 Apple Silicon。** 开发机是 M 系列 + macOS 26。Intel Mac 理论上能编能跑，没验证过。
+- **没有公证。** ad-hoc 本地签名，不是开发者证书，所以下载后要手动放行一次。
+- **x86_64 切片没在真 Intel 机器上跑过。** 通用二进制是在 Apple Silicon 上交叉编译的，x86_64 切片只经 Rosetta 验证过能启动、渲染输出和 arm64 一致。
 - **单机口径。** 只报本机 CPU、内存、物理网卡速率，没有 GPU、温度、磁盘、进程列表。要这些用 `mo status`。
 
 ## 致谢

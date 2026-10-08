@@ -12,18 +12,6 @@ struct Sample {
     let txMBs: Double
 }
 
-/// 两种取数方式共用的接口：原生 mach 调用，或者 mole 的 status-go 子进程。
-protocol MetricsSource: AnyObject {
-    var onSample: ((Sample) -> Void)? { get set }
-    var onFailure: ((String) -> Void)? { get set }
-    /// 菜单里显示的名字
-    var displayName: String { get }
-    func start()
-    func stop()
-    /// 卡住时人工重置
-    func restart()
-}
-
 enum Format {
     /// 百分比：固定无小数，宽度靠等宽数字字体稳住。
     static func percent(_ value: Double) -> String {

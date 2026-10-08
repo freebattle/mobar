@@ -13,6 +13,10 @@ APP="$DIST/$APP_NAME.app"
 UNIVERSAL=0
 [[ "${1:-}" == "--universal" ]] && UNIVERSAL=1
 
+# 签名身份。自签证书（./create-signing-identity.sh 生成一次）的 designated requirement
+# 是证书指纹，重建后辅助功能授权和登录项都继续有效；机器上没有这个身份就退回 ad-hoc。
+SIGN_IDENTITY="${MOBAR_SIGN_IDENTITY:-MoBar Local Signing}"
+
 # SwiftPM 的 --arch 双架构要走 xcbuild，只装命令行工具时不可用，
 # 所以这里分别按 triple 编两遍再 lipo 合并。
 ARM_TRIPLE="arm64-apple-macosx13.0"
@@ -47,10 +51,18 @@ fi
 echo "==> 组装 $APP"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
+if compgen -G "Resources/*.icns" > /dev/null; then
+	cp Resources/*.icns "$APP/Contents/Resources/"
+fi
 
-# 本地自签，让系统把它当同一个身份，TCC 授权和登录项不会每次重置
-echo "==> ad-hoc 签名"
-codesign --force --sign - --timestamp=none "$APP" >/dev/null
+if security find-identity -v -p codesigning 2>/dev/null | grep -qF "\"$SIGN_IDENTITY\""; then
+	echo "==> 用 \"$SIGN_IDENTITY\" 签名"
+	codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP" >/dev/null
+else
+	echo "==> 没有 \"$SIGN_IDENTITY\" 证书，退回 ad-hoc 签名"
+	echo "    ad-hoc 的 DR 是 cdhash，重建后要重新给辅助功能授权；想换成固定身份跑 ./create-signing-identity.sh"
+	codesign --force --sign - --timestamp=none "$APP" >/dev/null
+fi
 
 echo
 echo "打包完成: $APP  ($(lipo -archs "$APP/Contents/MacOS/$APP_NAME"))"

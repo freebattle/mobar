@@ -1,16 +1,13 @@
 import Darwin
 import Foundation
 
-/// 不依赖 mole，直接读内核：
+/// 直接读内核：
 /// - CPU：host_statistics(HOST_CPU_LOAD_INFO) 的 tick 增量
 /// - 内存：host_statistics64(HOST_VM_INFO64)
 /// - 网速：getifaddrs 的 AF_LINK if_data 字节数增量
-///
-/// 口径经过和 mole 并排比对校准，切换数据源时数字不会跳。
-final class NativeMetricsSource: MetricsSource {
+final class NativeMetricsSource {
     var onSample: ((Sample) -> Void)?
     var onFailure: ((String) -> Void)?
-    let displayName = Settings.SourceKind.native.displayName
 
     private let interval: TimeInterval
     private let queue = DispatchQueue(label: "fit.mole.mobar.native")
@@ -145,7 +142,7 @@ final class NativeMetricsSource: MetricsSource {
 
     // MARK: - 内存
 
-    /// 口径对齐 mole（gopsutil）：used = total - free - inactive。
+    /// 口径：used = total - free - inactive。
     /// 想要 Activity Monitor 的「已用内存」语义，换成 (active + wired + compressed)，
     /// 本机实测两者差约 2.7 个百分点。
     private static func readMemoryPercent() -> Double? {

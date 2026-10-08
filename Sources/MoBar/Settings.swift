@@ -1,21 +1,43 @@
 import Foundation
 
-/// 只有两个开关，存 UserDefaults，没有设置界面，全在菜单里点。
+/// 几个开关存 UserDefaults，没有设置界面，全在菜单里点。
 enum Settings {
-    enum SourceKind: String {
-        case native
-        case mole
+    enum ClipboardShortcut: String, CaseIterable {
+        case cmdShiftV
+        case ctrlOptV
+        case optV
+        case optSpace
 
         var displayName: String {
             switch self {
-            case .native: return "系统原生"
-            case .mole: return "mole status-go"
+            case .cmdShiftV: return "⌘⇧V"
+            case .ctrlOptV: return "⌃⌥V"
+            case .optV: return "⌥V"
+            case .optSpace: return "⌥Space"
             }
         }
     }
 
     private static let showLabelsKey = "showLabels"
-    private static let sourceKey = "source"
+    private static let clipboardEnabledKey = "clipboardEnabled"
+    private static let clipboardShortcutKey = "clipboardShortcut"
+
+    static var clipboardEnabled: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: clipboardEnabledKey) == nil { return true }
+            return UserDefaults.standard.bool(forKey: clipboardEnabledKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: clipboardEnabledKey) }
+    }
+
+    static var clipboardShortcut: ClipboardShortcut {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: clipboardShortcutKey),
+                  let shortcut = ClipboardShortcut(rawValue: raw) else { return .cmdShiftV }
+            return shortcut
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: clipboardShortcutKey) }
+    }
 
     static var showLabels: Bool {
         get {
@@ -24,14 +46,5 @@ enum Settings {
             return UserDefaults.standard.bool(forKey: showLabelsKey)
         }
         set { UserDefaults.standard.set(newValue, forKey: showLabelsKey) }
-    }
-
-    static var source: SourceKind {
-        get {
-            guard let raw = UserDefaults.standard.string(forKey: sourceKey),
-                  let kind = SourceKind(rawValue: raw) else { return .native }
-            return kind
-        }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: sourceKey) }
     }
 }

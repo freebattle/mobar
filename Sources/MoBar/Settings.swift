@@ -30,13 +30,21 @@ enum Settings {
         set { UserDefaults.standard.set(newValue, forKey: clipboardEnabledKey) }
     }
 
-    static var clipboardShortcut: ClipboardShortcut {
+    /// 可同时启用多个呼出快捷键。老版本存的是单个字符串，读的时候照样认。
+    static var clipboardShortcuts: Set<ClipboardShortcut> {
         get {
-            guard let raw = UserDefaults.standard.string(forKey: clipboardShortcutKey),
-                  let shortcut = ClipboardShortcut(rawValue: raw) else { return .cmdShiftV }
-            return shortcut
+            let defaults = UserDefaults.standard
+            let raws = defaults.stringArray(forKey: clipboardShortcutKey)
+                ?? defaults.string(forKey: clipboardShortcutKey).map { [$0] }
+                ?? []
+            let shortcuts = Set(raws.compactMap(ClipboardShortcut.init(rawValue:)))
+            return shortcuts.isEmpty ? [.cmdShiftV] : shortcuts
         }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: clipboardShortcutKey) }
+        set {
+            // 按 allCases 的顺序存，defaults read 出来稳定好读
+            let raws = ClipboardShortcut.allCases.filter(newValue.contains).map(\.rawValue)
+            UserDefaults.standard.set(raws, forKey: clipboardShortcutKey)
+        }
     }
 
     static var showLabels: Bool {

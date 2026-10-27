@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let clipboardStore = ClipboardStore()
     private lazy var clipboardPanel = ClipboardPanelController(store: clipboardStore)
-    private var clipboardHotKey: HotKey?
+    private var clipboardHotKeys: [HotKey] = []
 
     /// 超过这个时间没有新样本就显示占位符，避免停在最后一帧骗人。
     private static let staleAfter: TimeInterval = 7
@@ -43,16 +43,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 剪贴板历史
 
     private func applyClipboardSettings() {
-        clipboardHotKey = nil
+        clipboardHotKeys = []
         guard Settings.clipboardEnabled else {
             clipboardStore.stop()
             clipboardPanel.close()
             return
         }
         clipboardStore.start()
-        let shortcut = Settings.clipboardShortcut
-        clipboardHotKey = HotKey(keyCode: shortcut.keyCode, modifiers: shortcut.carbonModifiers) { [weak self] in
-            self?.clipboardPanel.toggle()
+        let shortcuts = Settings.ClipboardShortcut.allCases.filter(Settings.clipboardShortcuts.contains)
+        clipboardHotKeys = shortcuts.compactMap { shortcut in
+            HotKey(keyCode: shortcut.keyCode, modifiers: shortcut.carbonModifiers) { [weak self] in
+                self?.clipboardPanel.toggle()
+            }
         }
     }
 
@@ -130,13 +132,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let shortcutMenu = NSMenu()
         for shortcut in Settings.ClipboardShortcut.allCases {
-            let item = NSMenuItem(title: shortcut.displayName, action: #selector(selectClipboardShortcut(_:)), keyEquivalent: "")
+            let title = shortcut.worksInSecureInput ? shortcut.displayName : "\(shortcut.displayName)（密码框内无效）"
+            let item = NSMenuItem(title: title, action: #selector(selectClipboardShortcut(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = shortcut.rawValue
-            item.state = Settings.clipboardShortcut == shortcut ? .on : .off
+            item.state = Settings.clipboardShortcuts.contains(shortcut) ? .on : .off
             shortcutMenu.addItem(item)
         }
-        let shortcutItem = NSMenuItem(title: "  呼出快捷键", action: nil, keyEquivalent: "")
+        let shortcutItem = NSMenuItem(title: "  呼出快捷键（可多选）", action: nil, keyEquivalent: "")
         shortcutItem.submenu = shortcutMenu
         menu.addItem(shortcutItem)
 
@@ -177,7 +180,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectClipboardShortcut(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let shortcut = Settings.ClipboardShortcut(rawValue: raw) else { return }
-        Settings.clipboardShortcut = shortcut
+        // 勾选/取消勾选；至少留一个，不然面板就没法呼出了
+        var shortcuts = Settings.clipboardShortcuts
+        if shortcuts.contains(shortcut) {
+            guard shortcuts.count > 1 else { return }
+            shortcuts.remove(shortcut)
+        } else {
+            shortcuts.insert(shortcut)
+        }
+        Settings.clipboardShortcuts = shortcuts
         statusItem?.menu = buildMenu()
         applyClipboardSettings()
     }

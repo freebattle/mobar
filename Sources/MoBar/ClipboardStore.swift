@@ -182,11 +182,18 @@ final class ClipboardStore {
         onChange?()
     }
 
+    func imageURL(for item: ClipItem) -> URL? {
+        guard let file = item.imageFile else { return nil }
+        return imagesDirectory.appendingPathComponent(file)
+    }
+
     // MARK: - 持久化
 
     private func removeFile(of item: ClipItem) {
         guard let file = item.imageFile else { return }
-        try? FileManager.default.removeItem(at: imagesDirectory.appendingPathComponent(file))
+        let url = imagesDirectory.appendingPathComponent(file)
+        ImageThumbnailLoader.shared.removeCachedThumbnail(for: url)
+        try? FileManager.default.removeItem(at: url)
     }
 
     private func load() {

@@ -274,7 +274,22 @@ final class ClipboardPanelController: NSObject {
         let query = searchField.stringValue.trimmingCharacters(in: .whitespaces)
         filtered = query.isEmpty
             ? store.items
-            : store.items.filter { $0.kind == .text && ($0.text ?? "").localizedCaseInsensitiveContains(query) }
+            : store.items.filter { item in
+                switch item.kind {
+                case .text:
+                    return (item.text ?? "").localizedCaseInsensitiveContains(query)
+                case .image:
+                    if "图片".localizedCaseInsensitiveContains(query) || "image".localizedCaseInsensitiveContains(query) {
+                        return true
+                    }
+                    if let w = item.pixelWidth, let h = item.pixelHeight {
+                        let dim1 = "\(w)x\(h)"
+                        let dim2 = "\(w)×\(h)"
+                        return dim1.contains(query.lowercased()) || dim2.contains(query.lowercased())
+                    }
+                    return false
+                }
+            }
 
         tableView.reloadData()
         emptyLabel.stringValue = query.isEmpty ? "还没有剪贴板记录" : "没有匹配的记录"
@@ -320,7 +335,9 @@ extension ClipboardPanelController: NSTableViewDataSource, NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let card = tableView.makeView(withIdentifier: ClipCardView.identifier, owner: nil) as? ClipCardView
             ?? ClipCardView()
-        card.configure(with: filtered[row], index: row)
+        let item = filtered[row]
+        let imageURL = item.kind == .image ? store.imageURL(for: item) : nil
+        card.configure(with: item, index: row, imageURL: imageURL)
         card.isSelected = row == tableView.selectedRow
         return card
     }
@@ -330,7 +347,7 @@ extension ClipboardPanelController: NSTableViewDataSource, NSTableViewDelegate {
     }
 }
 
-/// 一条记录的卡片：正文（单行垂直居中，多行最多三行）、⌘N 快捷提示。
+/// 一条记录的卡片：正文或图片缩略图（最多三行高度）、⌘N 快捷提示。
 private final class ClipCardView: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("ClipCard")
 
@@ -343,6 +360,7 @@ private final class ClipCardView: NSTableCellView {
     private static let trailingColumn: CGFloat = leading + shortcutWidth + 8
     private static let metaHeight: CGFloat = 14
     private static let maxLines: CGFloat = 3
+    private static let maxContentHeight: CGFloat = titleLineHeight * maxLines
 
     private static let cardColor = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -351,7 +369,14 @@ private final class ClipCardView: NSTableCellView {
     }
 
     private let titleLabel = NSTextField(wrappingLabelWithString: "")
+    private let subtitleLabel = NSTextField(labelWithString: "")
     private let shortcutLabel = NSTextField(labelWithString: "")
+    private let thumbnailImageView = NSImageView()
+
+    private var currentItemID: UUID?
+    private var currentItemKind: ClipItem.Kind = .text
+    private var currentItemPixelWidth: Int?
+    private var currentItemPixelHeight: Int?
 
     var isSelected = false {
         didSet { if isSelected != oldValue { needsDisplay = true } }
@@ -369,22 +394,44 @@ private final class ClipCardView: NSTableCellView {
         titleLabel.lineBreakMode = .byWordWrapping
         titleLabel.cell?.truncatesLastVisibleLine = true
 
+        subtitleLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.lineBreakMode = .byTruncatingTail
+
         shortcutLabel.font = Self.metaFont
         shortcutLabel.textColor = .tertiaryLabelColor
         shortcutLabel.lineBreakMode = .byTruncatingTail
         shortcutLabel.alignment = .right
 
-        [titleLabel, shortcutLabel].forEach(addSubview)
+        thumbnailImageView.imageScaling = .scaleProportionallyUpOrDown
+        thumbnailImageView.imageAlignment = .alignCenter
+        thumbnailImageView.imageFrameStyle = .none
+        thumbnailImageView.wantsLayer = true
+        thumbnailImageView.layer?.cornerRadius = 6
+        thumbnailImageView.layer?.masksToBounds = true
+        thumbnailImageView.layer?.borderWidth = 0.5
+        thumbnailImageView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
+        thumbnailImageView.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.12).cgColor
+
+        // wrappingLabel 默认可选中，表格会把点在文字上的鼠标事件交给它做选区，行点击就不触发了
+        [titleLabel, subtitleLabel, shortcutLabel].forEach { $0.isSelectable = false }
+
+        [thumbnailImageView, titleLabel, subtitleLabel, shortcutLabel].forEach(addSubview)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     static func height(for item: ClipItem, width: CGFloat) -> CGFloat {
-        let tHeight = titleHeight(item.preview, cardWidth: width)
-        if tHeight <= titleLineHeight + 2 {
-            return 44
+        switch item.kind {
+        case .image:
+            return padding + maxContentHeight + padding
+        case .text:
+            let tHeight = titleHeight(item.preview, cardWidth: width)
+            if tHeight <= titleLineHeight + 2 {
+                return 44
+            }
+            return padding + tHeight + padding
         }
-        return padding + tHeight + padding
     }
 
     private static func titleHeight(_ text: String, cardWidth: CGFloat) -> CGFloat {
@@ -397,10 +444,57 @@ private final class ClipCardView: NSTableCellView {
         return min(max(ceil(measured), titleLineHeight), titleLineHeight * maxLines)
     }
 
-    func configure(with item: ClipItem, index: Int) {
-        titleLabel.stringValue = item.preview
-        titleLabel.textColor = item.kind == .image ? .secondaryLabelColor : .labelColor
+    func configure(with item: ClipItem, index: Int, imageURL: URL?) {
+        currentItemID = item.id
+        currentItemKind = item.kind
+        currentItemPixelWidth = item.pixelWidth
+        currentItemPixelHeight = item.pixelHeight
+
         shortcutLabel.stringValue = index < 9 ? "⌘\(index + 1)" : ""
+
+        switch item.kind {
+        case .text:
+            thumbnailImageView.isHidden = true
+            thumbnailImageView.image = nil
+            subtitleLabel.isHidden = true
+
+            titleLabel.isHidden = false
+            titleLabel.stringValue = item.preview
+            titleLabel.font = Self.titleFont
+            titleLabel.textColor = .labelColor
+            titleLabel.maximumNumberOfLines = Int(Self.maxLines)
+
+        case .image:
+            thumbnailImageView.isHidden = false
+            subtitleLabel.isHidden = false
+
+            titleLabel.isHidden = false
+            titleLabel.stringValue = "图片"
+            titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+            titleLabel.textColor = .labelColor
+            titleLabel.maximumNumberOfLines = 1
+
+            if let w = item.pixelWidth, let h = item.pixelHeight {
+                subtitleLabel.stringValue = "\(w) × \(h)"
+            } else {
+                subtitleLabel.stringValue = ""
+            }
+
+            if let url = imageURL {
+                if let cached = ImageThumbnailLoader.shared.cachedThumbnail(for: url) {
+                    thumbnailImageView.image = cached
+                } else {
+                    thumbnailImageView.image = nil
+                    ImageThumbnailLoader.shared.loadThumbnail(for: url, targetPixelSize: 240) { [weak self] image in
+                        guard let self, self.currentItemID == item.id else { return }
+                        self.thumbnailImageView.image = image
+                    }
+                }
+            } else {
+                thumbnailImageView.image = nil
+            }
+        }
+
         needsLayout = true
     }
 
@@ -408,23 +502,61 @@ private final class ClipCardView: NSTableCellView {
         super.layout()
         let width = bounds.width
         let height = bounds.height
-        let titleHeight = Self.titleHeight(titleLabel.stringValue, cardWidth: width)
         let p = Self.padding
-        let textWidth = width - Self.leading - Self.trailingColumn
-
-        // 正文垂直居中
-        let titleY = max(p, (height - titleHeight) / 2)
-        titleLabel.frame = NSRect(x: Self.leading, y: titleY, width: textWidth, height: titleHeight)
 
         // ⌘N 提示统一跟卡片垂直居中，单行多行一致
-        guard !shortcutLabel.stringValue.isEmpty else {
+        if !shortcutLabel.stringValue.isEmpty {
+            let metaH = Self.metaHeight
+            shortcutLabel.frame = NSRect(x: width - Self.leading - Self.shortcutWidth,
+                                         y: (height - metaH) / 2,
+                                         width: Self.shortcutWidth, height: metaH)
+        } else {
             shortcutLabel.frame = .zero
-            return
         }
-        let metaH = Self.metaHeight
-        shortcutLabel.frame = NSRect(x: width - Self.leading - Self.shortcutWidth,
-                                     y: (height - metaH) / 2,
-                                     width: Self.shortcutWidth, height: metaH)
+
+        switch currentItemKind {
+        case .text:
+            let textWidth = width - Self.leading - Self.trailingColumn
+            let titleHeight = Self.titleHeight(titleLabel.stringValue, cardWidth: width)
+            let titleY = max(p, (height - titleHeight) / 2)
+            titleLabel.frame = NSRect(x: Self.leading, y: titleY, width: textWidth, height: titleHeight)
+
+        case .image:
+            // 缩略图：高度最多为 3 行文字高度 (maxContentHeight)
+            // 宽度按原始图片比例自适应，并限制在 36 ~ 96 pt 范围内
+            let thumbHeight = Self.maxContentHeight
+            let thumbY = max(p, (height - thumbHeight) / 2)
+
+            let aspect: CGFloat
+            if let pw = currentItemPixelWidth, let ph = currentItemPixelHeight, pw > 0, ph > 0 {
+                aspect = CGFloat(pw) / CGFloat(ph)
+            } else {
+                aspect = 1.0
+            }
+
+            let rawWidth = thumbHeight * aspect
+            let thumbWidth = min(max(rawWidth, 36), 96)
+
+            thumbnailImageView.frame = NSRect(x: Self.leading, y: thumbY, width: thumbWidth, height: thumbHeight)
+
+            // 图片信息：在缩略图右侧垂直居中展示
+            let gap: CGFloat = 12
+            let labelX = Self.leading + thumbWidth + gap
+            let labelWidth = max(0, width - labelX - Self.trailingColumn)
+
+            let titleH: CGFloat = 17
+            let subtitleH: CGFloat = 14
+            let labelSpacing: CGFloat = 3
+            let totalTextH = subtitleLabel.stringValue.isEmpty ? titleH : (titleH + labelSpacing + subtitleH)
+            let labelY = max(p, (height - totalTextH) / 2)
+
+            titleLabel.frame = NSRect(x: labelX, y: labelY, width: labelWidth, height: titleH)
+            if !subtitleLabel.stringValue.isEmpty {
+                subtitleLabel.frame = NSRect(x: labelX, y: labelY + titleH + labelSpacing, width: labelWidth, height: subtitleH)
+            } else {
+                subtitleLabel.frame = .zero
+            }
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {

@@ -60,4 +60,10 @@ extension Settings.ClipboardShortcut {
         case .optV, .optSpace: return UInt32(optionKey)
         }
     }
+
+    /// 密码框等开启 Secure Event Input 时，系统不投递只带 ⌥（/⇧）修饰的 Carbon 热键，
+    /// 防止借 ⌥ 组合键窃听密码字符；带 ⌘ 或 ⌃ 的不受影响。
+    var worksInSecureInput: Bool {
+        carbonModifiers & UInt32(cmdKey | controlKey) != 0
+    }
 }
